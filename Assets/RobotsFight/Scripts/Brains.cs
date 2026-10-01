@@ -19,20 +19,24 @@ namespace RobotsFight
                 R.FireInput = false;
                 R.Interact = false;
                 R.SprintInput = false;
+                R.FlyInput = false;
                 return;
             }
             R.SprintInput = GameInput.Sprint;
             if (GameInput.Jump) R.Jump();
+            R.FlyInput = GameInput.JumpHeld;
+            if (GameInput.Howitzer) R.FireHowitzer();
             Vector2 m = GameInput.Move;
             R.MoveInput = Vector3.ClampMagnitude(cam.FlatForward * m.y + cam.FlatRight * m.x, 1f);
             R.HullYaw = cam.Yaw;
             R.AimPoint = cam.AimPoint;
             R.FireInput = GameInput.Fire;
             R.Interact = GameInput.Interact;
-            if (GameInput.Reload) R.ReloadAll();
             if (GameInput.Ability) R.UseAbility();
             if (GameInput.Melee) R.Swing();
             if (GameInput.Grenade) R.ThrowGrenade();
+            if (GameInput.Medkit) R.UseMedkit();
+            if (GameInput.ShieldItem) R.UseShieldItem();
         }
     }
 
@@ -47,6 +51,7 @@ namespace RobotsFight
         Robot target;
         bool targetVisible;
         float retargetIn, reaction, aimJitterIn, abilityCheckIn, strafeSwitchIn, wanderIn, grenadeCheckIn;
+        float howitzerCheckIn, flyCheckIn, flyUntil, vaultTryAt;
         float strafeSign = 1f, avoidSide = 1f, stuckTime, unstuckUntil;
         Vector3 aimError, unstuckDir, wanderOffset;
 
@@ -72,6 +77,12 @@ namespace RobotsFight
 
             Vector3 pos = R.transform.position;
             Objective? obj = match.Mode.BotObjective(R);
+            // Подбитый бот идёт за аптечкой из дропа, если она рядом (свои аптечки ботам запрещены)
+            if (R.Hp < R.MaxHp * 0.5f)
+            {
+                var kit = NearestPickup(PickupType.Medkit, 35f);
+                if (kit) obj = new Objective(kit.transform.position, 0.5f);
+            }
             bool fighting = target && targetVisible;
             Vector3 desired;
 
@@ -132,6 +143,18 @@ namespace RobotsFight
             // Бегом — только к далёкой цели и не в перестрелке
             float objDist = obj.HasValue ? Vec.FlatDist(obj.Value.Pos, pos) : 0f;
             R.SprintInput = !fighting && (objDist > 35f || (!obj.HasValue && !target));
+
+            // Далеко до цели и ранец заправлен — иногда перелетаем
+            flyCheckIn -= dt;
+            if (flyCheckIn <= 0)
+            {
+                flyCheckIn = 1.5f;
+                if (!fighting && objDist > 70f && R.Fuel > 0.95f && Random.value < 0.25f && R.Jump())
+                    flyUntil = Time.time + Random.Range(1.2f, 2.2f);
+            }
+            R.FlyInput = Time.time < flyUntil;
+
+            UseHowitzer(dt, match);
             if (R.MoveInput.sqrMagnitude > 0.01f) R.HullYaw = Quaternion.LookRotation(R.MoveInput).eulerAngles.y;
 
             // Прицеливание
@@ -171,10 +194,24 @@ namespace RobotsFight
                 R.FireInput = false;
                 Vector3 look = R.MoveInput.sqrMagnitude > 0.01f ? R.MoveInput : R.transform.forward;
                 R.AimPoint = pos + look * 40f + Vector3.up * R.Height;
-                R.ReloadIfLow(0.5f);
             }
 
             UseAbilities(dt, obj, fighting);
+        }
+
+        /// <summary>Гаубица — по дальним врагам (60–250 м), даже без прямой видимости. С упреждением.</summary>
+        void UseHowitzer(float dt, Match match)
+        {
+            howitzerCheckIn -= dt;
+            if (howitzerCheckIn > 0 || R.HowitzerReadyIn > 0) return;
+            howitzerCheckIn = 1.5f;
+            var e = target ? target : NearestEnemy(match);
+            if (!e) return;
+            float d = Vec.FlatDist(e.transform.position, R.transform.position);
+            if (d < 60f || d > 250f || Random.value > 0.25f + 0.35f * Skill) return;
+            float flight = Mathf.Clamp(d / 45f, 1.6f, 4.5f);
+            R.AimPoint = e.transform.position + Vec.Flat(e.Velocity) * (flight * Mathf.Lerp(0.2f, 0.7f, Skill));
+            R.FireHowitzer();
         }
 
         Vector3 StrafeDir()
@@ -186,6 +223,7 @@ namespace RobotsFight
 
         void UseAbilities(float dt, Objective? obj, bool fighting)
         {
+
             abilityCheckIn -= dt;
             if (abilityCheckIn > 0 || R.AbilityReadyIn > 0) return;
             abilityCheckIn = 0.5f;
@@ -235,6 +273,23 @@ namespace RobotsFight
             targetVisible = best && bestVis;
         }
 
+        Pickup NearestPickup(PickupType type, float maxDist)
+        {
+            Pickup best = null;
+            float bestD = maxDist;
+            foreach (var p in Pickup.All)
+            {
+                if (p.Type != type) continue;
+                float d = Vec.FlatDist(p.transform.position, R.transform.position);
+                if (d < bestD)
+                {
+                    bestD = d;
+                    best = p;
+                }
+            }
+            return best;
+        }
+
         Robot NearestEnemy(Match match)
         {
             Robot best = null;
@@ -268,6 +323,18 @@ namespace RobotsFight
             float look = 2.5f + R.Cc.radius * 2f;
             Vector3 d = dir.normalized;
             if (!Blocked(origin, radius, d, look)) return dir;
+
+            // Низкое препятствие — пробуем перепрыгнуть, а не обходить
+            if (Time.time >= vaultTryAt && R.CanVaultAhead(d))
+            {
+                vaultTryAt = Time.time + 1.5f;
+                if (Random.value < 0.6f)
+                {
+                    R.MoveInput = d; // Jump берёт направление из MoveInput
+                    R.Jump();
+                    return dir;
+                }
+            }
             for (int a = 30; a <= 150; a += 30)
             {
                 for (int k = 0; k < 2; k++)
@@ -286,6 +353,9 @@ namespace RobotsFight
 
         bool Blocked(Vector3 origin, float radius, Vector3 dir, float dist)
         {
+            // Лаву обходим как стену
+            var arena = Match.I.Arena;
+            if (arena.Lava.Count > 0 && (arena.InLava(origin + dir * 3f) || arena.InLava(origin + dir * (dist + 3f)))) return true;
             if (!Phys.SphereCast(origin, radius, dir, dist, R.Cc, out var hit)) return false;
             if (hit.distance <= 0f) return false; // стартовое пересечение (земля и т.п.)
             return !hit.collider.GetComponent<Robot>();

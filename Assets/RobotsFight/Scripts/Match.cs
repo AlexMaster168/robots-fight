@@ -58,10 +58,13 @@ namespace RobotsFight
         public Pilot LastKillerOfPlayer;
 
         List<string> names;
+        const float LavaDps = 220f;
 
         float BotSkill => Difficulty switch { Difficulty.Easy => 0.25f, Difficulty.Hard => 0.85f, _ => 0.55f };
 
-        public static Match Begin(ModeType type, RobotDef playerDef, Difficulty diff, bool autopilot)
+        public MapDef Map => Arena.Map;
+
+        public static Match Begin(ModeType type, RobotDef playerDef, Difficulty diff, bool autopilot, MapDef map)
         {
             var go = new GameObject("Match");
             var m = go.AddComponent<Match>();
@@ -71,7 +74,7 @@ namespace RobotsFight
             m.Autopilot = autopilot;
             m.PlayerDefChoice = playerDef;
             m.names = Names.Shuffled();
-            m.Arena = Arena.Build(go.transform);
+            m.Arena = Arena.Build(go.transform, map);
             go.AddComponent<Projectiles>();
             m.Mode = GameMode.Create(type);
             m.Mode.M = m;
@@ -161,6 +164,7 @@ namespace RobotsFight
         {
             var vp = victim.Pilot;
             vp.Deaths++;
+            Pickup.Spawn(victim.transform.position, Random.value < 0.5f ? PickupType.Medkit : PickupType.Shield);
             vp.Body = null;
             bool realKill = killer != null && killer != vp;
             if (realKill)
@@ -225,6 +229,15 @@ namespace RobotsFight
                 }
             }
             Mode.Tick(dt);
+
+            // Лава жжёт тех, кто стоит в ней (над лавой на ранце — можно)
+            if (Arena.Lava.Count > 0)
+                for (int i = 0; i < Pilots.Count; i++)
+                {
+                    var b = Pilots[i].Body;
+                    if (b && b.Alive && b.transform.position.y < 0.8f && Arena.InLava(b.transform.position))
+                        Damage(b, LavaDps * dt, null, Catalog.Lava, b.transform.position);
+                }
 
             for (int i = 0; i < Pilots.Count && !Over; i++)
             {

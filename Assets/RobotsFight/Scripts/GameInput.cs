@@ -23,9 +23,12 @@ namespace RobotsFight
         public static Vector2 Look => Ms != null ? Ms.delta.ReadValue() * 0.05f : Vector2.zero;
         public static bool Fire => Ms != null && Ms.leftButton.isPressed;
         public static bool Zoom => Ms != null && Ms.rightButton.isPressed;
-        public static bool Reload => KD(Key.R);
         public static bool Ability => KD(Key.Q);
         public static bool Jump => KD(Key.Space);
+        public static bool JumpHeld => K(Key.Space);
+        public static bool Medkit => KD(Key.X);
+        public static bool ShieldItem => KD(Key.C);
+        public static bool Howitzer => KD(Key.H) || (Ms != null && Ms.middleButton.wasPressedThisFrame);
         public static bool Sprint => K(Key.LeftShift) || K(Key.RightShift);
         public static bool Interact => K(Key.E);
         public static bool Scoreboard => K(Key.Tab);
@@ -45,9 +48,12 @@ namespace RobotsFight
         public static Vector2 Look => new(Input.GetAxisRaw("Mouse X"), Input.GetAxisRaw("Mouse Y"));
         public static bool Fire => Input.GetMouseButton(0);
         public static bool Zoom => Input.GetMouseButton(1);
-        public static bool Reload => KD(KeyCode.R);
         public static bool Ability => KD(KeyCode.Q);
         public static bool Jump => KD(KeyCode.Space);
+        public static bool JumpHeld => K(KeyCode.Space);
+        public static bool Medkit => KD(KeyCode.X);
+        public static bool ShieldItem => KD(KeyCode.C);
+        public static bool Howitzer => KD(KeyCode.H) || Input.GetMouseButtonDown(2);
         public static bool Sprint => K(KeyCode.LeftShift) || K(KeyCode.RightShift);
         public static bool Interact => K(KeyCode.E);
         public static bool Scoreboard => K(KeyCode.Tab);

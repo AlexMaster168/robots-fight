@@ -49,7 +49,14 @@ namespace RobotsFight
             bool collider = false, bool glow = false)
         {
             var go = GameObject.CreatePrimitive(type);
-            if (!collider) Object.DestroyImmediate(go.GetComponent<Collider>());
+            if (!collider || type != PrimitiveType.Cube) Object.DestroyImmediate(go.GetComponent<Collider>());
+            if (collider && type != PrimitiveType.Cube)
+            {
+                // Капсула/сфера при неравномерном масштабе раздувается — выпуклый меш повторяет форму точно
+                var mc = go.AddComponent<MeshCollider>();
+                mc.sharedMesh = go.GetComponent<MeshFilter>().sharedMesh;
+                mc.convex = true;
+            }
             var t = go.transform;
             t.SetParent(parent, false);
             t.localPosition = localPos;
@@ -155,6 +162,12 @@ namespace RobotsFight
             }
             return list;
         }
+    }
+
+    public static class World
+    {
+        /// <summary>Множитель гравитации текущей локации (Луна — 0.35).</summary>
+        public static float GravityMult => Match.I && Match.I.Arena != null ? Match.I.Arena.Map.Gravity : 1f;
     }
 
     public static class Vec

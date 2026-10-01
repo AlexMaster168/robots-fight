@@ -11,7 +11,7 @@ namespace RobotsFight
         public const float H = 1080f;
         float scale;
 
-        public GUIStyle SBig, SMid, SMidCenter, SSmall, SSmallLeft, SSmallRight, STiny, SButton, SMarker;
+        public GUIStyle SBig, SMid, SMidCenter, SSmall, SSmallLeft, SSmallRight, STiny, STinyLeft, STinyRight, SButton, SButtonSmall, SMarker;
         readonly List<MapMarker> markers = new();
 
         public void Begin()
@@ -28,8 +28,11 @@ namespace RobotsFight
             SSmallLeft = Style(20, TextAnchor.MiddleLeft);
             SSmallRight = Style(20, TextAnchor.MiddleRight);
             STiny = Style(15, TextAnchor.MiddleCenter);
+            STinyLeft = Style(16, TextAnchor.MiddleLeft);
+            STinyRight = Style(15, TextAnchor.MiddleRight);
             SMarker = Style(18, TextAnchor.MiddleCenter, FontStyle.Bold);
             SButton = new GUIStyle(GUI.skin.button) { fontSize = 22, fontStyle = FontStyle.Bold, wordWrap = true };
+            SButtonSmall = new GUIStyle(SButton) { fontSize = 18, wordWrap = false };
         }
 
         static GUIStyle Style(int size, TextAnchor anchor, FontStyle fs = FontStyle.Normal) =>
@@ -129,6 +132,10 @@ namespace RobotsFight
                 Label(new Rect(W / 2 - 80, 84, 160, 34), FormatTime(m.TimeLeft), SMid, Color.white);
 
             DrawRadar(m);
+            Label(new Rect(20, 244, 220, 24), m.Map.Name + (m.Map.Gravity < 1f ? $" · гравитация ×{m.Map.Gravity:0.##}" : ""),
+                STinyLeft, new Color(0.7f, 1f, 0.8f, 0.85f));
+            if (alive && body.transform.position.y < 0.8f && m.Arena.InLava(body.transform.position))
+                CenterText(560, "ЛАВА! Уходи или взлетай!", SMidCenter, Mathf.Repeat(Time.time, 0.4f) < 0.2f ? Palette.Red : Palette.Gold);
             DrawFeed(m);
 
             // Урон по нам — красная рамка
@@ -219,34 +226,43 @@ namespace RobotsFight
                 var w = r.Weapons[i];
                 float y = box.y + 8 + i * rowH;
                 Label(new Rect(box.x + 12, y, 200, 24), w.Def.Name, SSmallLeft, w.Def.Color);
-                string ammo = w.Reloading ? "перезарядка" : $"{w.Ammo} / {w.Def.Magazine}";
-                Label(new Rect(box.x + 150, y, 196, 24), ammo, SSmallRight, w.Ammo == 0 || w.Reloading ? Palette.Red : Color.white);
-                float v = w.Reloading ? w.ReloadProgress : (float)w.Ammo / w.Def.Magazine;
-                Bar(new Rect(box.x + 12, y + 26, 336, 8), v, w.Reloading ? Palette.Gold : w.Def.Color);
+                Label(new Rect(box.x + 150, y, 196, 24), "∞", SSmallRight, Color.white);
+                Bar(new Rect(box.x + 12, y + 26, 336, 8), w.Readiness, w.Def.Color);
             }
-            Label(new Rect(box.x, box.y - 26, box.width, 22), "ЛКМ огонь · ПКМ зум · R перезарядка", STiny, new Color(1, 1, 1, 0.6f));
+            Label(new Rect(box.x, box.y - 26, box.width, 22), "ЛКМ огонь · ПКМ зум", STiny, new Color(1, 1, 1, 0.6f));
         }
 
         void DrawInventory(Robot r)
         {
-            float w = 220, gap = 10;
-            float x = W / 2 - (w * 3 + gap * 2) / 2, y = H - 84;
-            Slot(new Rect(x, y, w, 64), "[F]  Меч", r.MeleeReadyIn <= 0 ? "готов" : $"{r.MeleeReadyIn:0.0} с",
+            float w = 138, gap = 6; // 7 слотов между панелью здоровья (до x=440) и оружием
+            float x = W / 2 - (w * 7 + gap * 6) / 2, y = H - 90;
+            Rect S(int i) => new(x + i * (w + gap), y, w, 72);
+
+            Slot(S(0), "Меч", "F", r.MeleeReadyIn <= 0 ? "готов" : $"{r.MeleeReadyIn:0.0} с",
                 1f - r.MeleeReadyIn / Robot.MeleeCooldown, Catalog.Sword.Color, true);
-            Slot(new Rect(x + w + gap, y, w, 64), "[G]  Гранаты", $"× {r.Grenades}",
+            Slot(S(1), "Гранаты", "G", $"× {r.Grenades}",
                 r.Grenades > 0 ? 1f - r.GrenadeReadyIn / Robot.GrenadeCooldown : 0f, Catalog.Grenade.Color, r.Grenades > 0);
-            Slot(new Rect(x + (w + gap) * 2, y, w, 64), "[Shift]  Бег", r.Sprinting ? "бегу" : $"{r.Stamina * 100:0}%",
+            Slot(S(5), "Аптечка", "X", r.Healing ? "лечу" : r.MedkitReadyIn <= 0 ? "готова" : $"{r.MedkitReadyIn:0} с",
+                1f - r.MedkitReadyIn / Robot.MedkitCooldown, new Color(0.3f, 1f, 0.4f), r.MedkitReadyIn <= 0);
+            Slot(S(6), "Щит", "C", r.ShieldActive ? "активен" : r.ShieldItemReadyIn <= 0 ? "готов" : $"{r.ShieldItemReadyIn:0} с",
+                1f - r.ShieldItemReadyIn / Robot.ShieldItemCooldown, new Color(0.4f, 0.8f, 1f), r.ShieldItemReadyIn <= 0 || r.ShieldActive);
+            Slot(S(2), "Гаубица", "H", r.HowitzerReadyIn <= 0 ? "готова" : $"{r.HowitzerReadyIn:0} с",
+                1f - r.HowitzerReadyIn / Catalog.HowitzerCooldown, Catalog.Howitzer.Color, r.HowitzerReadyIn <= 0);
+            Slot(S(3), "Бег", "Shift", r.Sprinting ? "бегу" : $"{r.Stamina * 100:0}%",
                 r.Stamina, Palette.Gold, r.Stamina > 0.15f || r.Sprinting);
+            Slot(S(4), "Полёт", "Space", r.Flying ? "лечу!" : $"{r.Fuel * 100:0}%",
+                r.Fuel, new Color(1f, 0.55f, 0.15f), r.Fuel > 0.05f || r.Flying);
         }
 
-        void Slot(Rect r, string title, string state, float charge, Color c, bool active)
+        void Slot(Rect r, string title, string key, string state, float charge, Color c, bool active)
         {
             Box(r, new Color(0, 0, 0, 0.5f));
             Box(new Rect(r.x, r.y, 4, r.height), active ? c : Color.gray);
             var tc = active ? Color.white : new Color(1, 1, 1, 0.4f);
-            Label(new Rect(r.x + 14, r.y + 6, r.width - 24, 26), title, SSmallLeft, tc);
-            Label(new Rect(r.x + 14, r.y + 6, r.width - 24, 26), state, SSmallRight, active ? c : Palette.Red);
-            Bar(new Rect(r.x + 14, r.y + 40, r.width - 28, 10), charge, active ? c : Color.gray);
+            Label(new Rect(r.x + 12, r.y + 4, r.width - 20, 26), title, SSmallLeft, tc);
+            Label(new Rect(r.x + 12, r.y + 30, r.width - 20, 20), state, STinyLeft, active ? c : Palette.Red);
+            Label(new Rect(r.x + 12, r.y + 30, r.width - 20, 20), key, STinyRight, new Color(1, 1, 1, 0.55f));
+            Bar(new Rect(r.x + 12, r.y + 54, r.width - 24, 10), charge, active ? c : Color.gray);
         }
 
         void DrawNameplates(Match m)
@@ -305,6 +321,12 @@ namespace RobotsFight
                 var p = Map(mk.Pos);
                 Box(new Rect(p.x - 9, p.y - 9, 18, 18), new Color(0, 0, 0, 0.6f));
                 Label(new Rect(p.x - 12, p.y - 12, 24, 24), mk.Label, STiny, mk.Color);
+            }
+
+            foreach (var pk in Pickup.All)
+            {
+                var q = Map(pk.transform.position);
+                Box(new Rect(q.x - 3, q.y - 3, 6, 6), pk.Color);
             }
 
             foreach (var p in m.Pilots)

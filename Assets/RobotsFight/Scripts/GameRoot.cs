@@ -22,6 +22,7 @@ namespace RobotsFight
         bool paused;
         ModeType mode;
         int robotIndex;
+        int mapIndex = -1; // -1 — случайная локация
         Difficulty difficulty = Difficulty.Normal;
         float demoRestartAt = -1f;
 
@@ -56,6 +57,7 @@ namespace RobotsFight
             mode = (ModeType)Mathf.Clamp(PlayerPrefs.GetInt("rf_mode", 0), 0, 4);
             robotIndex = Mathf.Clamp(PlayerPrefs.GetInt("rf_robot", 0), 0, Catalog.Robots.Length - 1);
             difficulty = (Difficulty)Mathf.Clamp(PlayerPrefs.GetInt("rf_diff", 1), 0, 2);
+            mapIndex = Mathf.Clamp(PlayerPrefs.GetInt("rf_map", -1), -1, Maps.All.Length - 1);
 
             var args = System.Environment.GetCommandLineArgs();
             autotest = args.Contains("-autotest");
@@ -66,7 +68,10 @@ namespace RobotsFight
             }
             else
             {
-                gameObject.AddComponent<MusicPlayer>();
+                var music = gameObject.AddComponent<MusicPlayer>();
+                // Все треки синтезируются заранее в фоне — на старте боя музыка уже готова
+                music.Prewarm(MusicStyle.Menu);
+                foreach (var map in Maps.All) music.Prewarm(map.Music);
                 StartDemo();
             }
             if (args.Contains("-shots")) StartCoroutine(Screenshots());
@@ -81,11 +86,11 @@ namespace RobotsFight
         void StartDemo()
         {
             StopMatch();
-            Match.Begin(ModeType.TeamDeathmatch, Catalog.RandomRobot(), Difficulty.Normal, true);
+            Match.Begin(ModeType.TeamDeathmatch, Catalog.RandomRobot(), Difficulty.Normal, true, Maps.Random());
             state = State.Menu;
             demoRestartAt = -1f;
             Time.timeScale = 1f;
-            if (MusicPlayer.I) MusicPlayer.I.Play(false);
+            if (MusicPlayer.I) MusicPlayer.I.Play(MusicStyle.Menu);
         }
 
         void StartMatch()
@@ -94,10 +99,12 @@ namespace RobotsFight
             PlayerPrefs.SetInt("rf_mode", (int)mode);
             PlayerPrefs.SetInt("rf_robot", robotIndex);
             PlayerPrefs.SetInt("rf_diff", (int)difficulty);
-            Match.Begin(mode, Catalog.Robots[robotIndex], difficulty, false);
+            PlayerPrefs.SetInt("rf_map", mapIndex);
+            var map = mapIndex < 0 ? Maps.Random() : Maps.All[mapIndex];
+            Match.Begin(mode, Catalog.Robots[robotIndex], difficulty, false, map);
             state = State.Playing;
             SetPaused(false);
-            if (MusicPlayer.I) MusicPlayer.I.Play(true);
+            if (MusicPlayer.I) MusicPlayer.I.Play(map.Music);
         }
 
         static void StopMatch()
@@ -170,11 +177,11 @@ namespace RobotsFight
             else if (GameInput.Scoreboard) hud.Scoreboard(m, 170);
         }
 
-        bool Button(Rect r, string text, bool selected = false, Color? tint = null)
+        bool Button(Rect r, string text, bool selected = false, Color? tint = null, GUIStyle style = null)
         {
             var old = GUI.backgroundColor;
             GUI.backgroundColor = selected ? (tint ?? new Color(0.3f, 0.7f, 1f)) * 1.6f : new Color(0.55f, 0.55f, 0.6f);
-            bool click = GUI.Button(r, text, hud.SButton);
+            bool click = GUI.Button(r, text, style ?? hud.SButton);
             GUI.backgroundColor = old;
             return click;
         }
@@ -197,12 +204,12 @@ namespace RobotsFight
             hud.Label(new Rect(cx - 600, 226, 1200, 56), desc, hud.SSmall, Color.white);
 
             // Роботы
-            float cw = 290, ch = 320;
+            float cw = 290, ch = 290;
             x0 = cx - (Catalog.Robots.Length * (cw + gap) - gap) / 2;
             for (int i = 0; i < Catalog.Robots.Length; i++)
             {
                 var d = Catalog.Robots[i];
-                var r = new Rect(x0 + i * (cw + gap), 300, cw, ch);
+                var r = new Rect(x0 + i * (cw + gap), 290, cw, ch);
                 bool sel = robotIndex == i;
                 hud.Box(r, sel ? new Color(0.15f, 0.35f, 0.6f, 0.85f) : new Color(0, 0, 0, 0.6f));
                 if (sel) hud.Box(new Rect(r.x, r.y, r.width, 4), Palette.Gold);
@@ -215,25 +222,38 @@ namespace RobotsFight
                 var wnames = string.Join(", ", d.Weapons.GroupBy(w => w.Name).Select(g => g.Count() > 1 ? $"{g.Count()}× {g.Key}" : g.Key));
                 hud.Label(new Rect(r.x + 16, y + 70, cw - 32, 50), wnames, hud.STiny, new Color(1f, 0.85f, 0.6f));
                 hud.Label(new Rect(r.x + 16, y + 118, cw - 32, 24), $"Способность: {d.AbilityName}", hud.STiny, new Color(0.5f, 0.9f, 1f));
-                hud.Label(new Rect(r.x + 16, y + 142, cw - 32, 90), d.Description, hud.STiny, new Color(1, 1, 1, 0.75f));
+                hud.Label(new Rect(r.x + 16, y + 142, cw - 32, 62), d.Description, hud.STiny, new Color(1, 1, 1, 0.75f));
                 if (GUI.Button(r, GUIContent.none, GUIStyle.none)) robotIndex = i;
             }
+
+            // Локации
+            float mw = 160, mg = 8;
+            int mapCount = Maps.All.Length + 1;
+            x0 = cx - (mapCount * (mw + mg) - mg) / 2;
+            for (int i = -1; i < Maps.All.Length; i++)
+            {
+                string label = i < 0 ? "Случайная" : Maps.All[i].Name;
+                if (Button(new Rect(x0 + (i + 1) * (mw + mg), 596, mw, 44), label, mapIndex == i, new Color(0.4f, 1f, 0.6f), hud.SButtonSmall))
+                    mapIndex = i;
+            }
+            string mapDesc = mapIndex < 0 ? "Каждый бой — на случайной из 6 локаций." : Maps.All[mapIndex].Description;
+            hud.Label(new Rect(cx - 600, 644, 1200, 30), mapDesc, hud.SSmall, new Color(0.7f, 1f, 0.8f));
 
             // Сложность
             string[] diffs = { "Лёгкие боты", "Нормальные", "Злые боты" };
             x0 = cx - (3 * (bw + gap) - gap) / 2;
             for (int i = 0; i < 3; i++)
-                if (Button(new Rect(x0 + i * (bw + gap), 650, bw, 48), diffs[i], (int)difficulty == i, new Color(1f, 0.6f, 0.2f)))
+                if (Button(new Rect(x0 + i * (bw + gap), 684, bw, 44), diffs[i], (int)difficulty == i, new Color(1f, 0.6f, 0.2f)))
                     difficulty = (Difficulty)i;
 
-            if (Button(new Rect(cx - 220, 730, 440, 84), "В БОЙ!  [Enter]", true, new Color(1f, 0.7f, 0.1f)))
+            if (Button(new Rect(cx - 220, 742, 440, 74), "В БОЙ!  [Enter]", true, new Color(1f, 0.7f, 0.1f)))
                 StartMatch();
 
-            hud.Label(new Rect(cx - 600, 840, 1200, 110),
-                "WASD — движение · Shift — бег · Space — прыжок · Мышь — обзор · ЛКМ — огонь · ПКМ — зум\n" +
-                "R — перезарядка · Q — способность · F — меч · G — граната · E — заложить/разминировать бомбу\n" +
-                "Tab — таблица · Esc — пауза · M — музыка · " +
-                "Пока мёртв — клавиши 1-4 выбирают следующего робота",
+            hud.Label(new Rect(cx - 640, 830, 1280, 130),
+                "WASD — движение · Shift — бег · Space — прыжок (через препятствие — само) · держать Space в воздухе — полёт\n" +
+                "Мышь — обзор · ЛКМ — огонь · ПКМ — зум · Q — способность · F — меч · G — граната\n" +
+                "H / колёсико — гаубица · E — заложить/разминировать бомбу · Tab — таблица · Esc — пауза · M — музыка\n" +
+                "X — аптечка · C — щит · Пока мёртв — клавиши 1-4 выбирают следующего робота",
                 hud.SSmall, new Color(1, 1, 1, 0.7f));
         }
 
@@ -330,17 +350,30 @@ namespace RobotsFight
             float scale = ArgFloat("-autotestScale", 12f);
             var report = new StringBuilder();
 
-            // Музыку синтезируем и здесь — проверить, что генератор не падает
+            // Все треки синтезируем так же, как в игре — в фоновых потоках
             var t0 = Time.realtimeSinceStartup;
-            var mc = MusicSynth.Build(false);
-            var bc = MusicSynth.Build(true);
-            report.AppendLine($"[AUTOTEST] Music: menu={mc.length:0.0}s battle={bc.length:0.0}s synth={Time.realtimeSinceStartup - t0:0.00}s");
-
-            foreach (ModeType mt in System.Enum.GetValues(typeof(ModeType)))
+            var styles = new List<MusicStyle> { MusicStyle.Menu };
+            styles.AddRange(Maps.All.Select(mp => mp.Music));
+            var tasks = styles.Select(st => System.Threading.Tasks.Task.Run(() => MusicSynth.Render(st))).ToList();
+            while (tasks.Any(t => !t.IsCompleted)) yield return null;
+            var lens = new List<string>();
+            for (int i = 0; i < styles.Count; i++)
             {
+                if (tasks[i].IsFaulted) Debug.LogError($"Music {styles[i].Id} failed: {tasks[i].Exception}");
+                else lens.Add($"{styles[i].Id}={MusicSynth.ToClip(styles[i].Id, tasks[i].Result).length:0.0}s");
+            }
+            report.AppendLine($"[AUTOTEST] Music: {string.Join(" ", lens)} synth={Time.realtimeSinceStartup - t0:0.00}s");
+
+            // Каждая локация по разу, режимы по кругу — так покрыты все карты и все режимы
+            var modes = (ModeType[])System.Enum.GetValues(typeof(ModeType));
+            for (int i = 0; i < Maps.All.Length; i++)
+            {
+                var map = Maps.All[i];
+                var mt = modes[i % modes.Length];
                 StopMatch();
                 yield return null;
-                var m = Match.Begin(mt, Catalog.Robots[(int)mt % Catalog.Robots.Length], Difficulty.Normal, true);
+                Robot.VaultCount = Robot.FlightCount = Robot.HowitzerCount = Robot.MedkitCount = Robot.ShieldItemCount = Pickup.PickedCount = 0;
+                var m = Match.Begin(mt, Catalog.Robots[i % Catalog.Robots.Length], Difficulty.Normal, true, map);
                 state = State.Playing;
                 Time.timeScale = scale;
                 int errBefore = errors;
@@ -349,9 +382,10 @@ namespace RobotsFight
                 Time.timeScale = 1f;
 
                 string line = m
-                    ? $"[AUTOTEST] {mt}: finished={m.Over} result='{m.Result}' details='{m.ResultDetails}' gameTime={m.Elapsed:0}s " +
-                      $"real={Time.realtimeSinceStartup - realStart:0.0}s kills={m.Pilots.Sum(p => p.Kills)} pilots={m.Pilots.Count} errors={errors - errBefore}"
-                    : $"[AUTOTEST] {mt}: match object vanished!";
+                    ? $"[AUTOTEST] {map.Id}/{mt}: finished={m.Over} result='{m.Result}' details='{m.ResultDetails}' gameTime={m.Elapsed:0}s " +
+                      $"real={Time.realtimeSinceStartup - realStart:0.0}s kills={m.Pilots.Sum(p => p.Kills)} " +
+                      $"vaults={Robot.VaultCount} flights={Robot.FlightCount} howitzer={Robot.HowitzerCount} medkits={Robot.MedkitCount} shields={Robot.ShieldItemCount} pickups={Pickup.PickedCount} errors={errors - errBefore}"
+                    : $"[AUTOTEST] {map.Id}/{mt}: match object vanished!";
                 Debug.Log(line);
                 report.AppendLine(line);
             }
@@ -381,14 +415,18 @@ namespace RobotsFight
             yield return null;
             yield return null;
 
+            // Каждая локация в своём режиме (режимы по кругу)
             var modes = (ModeType[])System.Enum.GetValues(typeof(ModeType));
-            for (int i = 0; i < modes.Length; i++)
+            for (int i = 0; i < Maps.All.Length; i++)
             {
+                var map = Maps.All[i];
+                var mt = modes[i % modes.Length];
                 StopMatch();
-                Match.Begin(modes[i], Catalog.Robots[(i + 1) % Catalog.Robots.Length], Difficulty.Normal, true);
+                Match.Begin(mt, Catalog.Robots[(i + 1) % Catalog.Robots.Length], Difficulty.Normal, true, map);
                 state = State.Playing;
-                yield return new WaitForSecondsRealtime(modes[i] == ModeType.Survival ? 14f : 22f);
-                ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, $"{i + 1}_{modes[i].ToString().ToLowerInvariant()}.png"));
+                if (MusicPlayer.I) MusicPlayer.I.Play(map.Music);
+                yield return new WaitForSecondsRealtime(mt == ModeType.Survival ? 14f : 20f);
+                ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(dir, $"{i + 1}_{map.Id}.png"));
                 yield return null;
                 yield return null;
             }

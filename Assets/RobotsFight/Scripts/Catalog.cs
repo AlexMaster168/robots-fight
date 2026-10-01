@@ -4,16 +4,16 @@ namespace RobotsFight
 {
     public enum AbilityType { Dash, Shield, Repair, JumpJet }
     public enum Chassis { Biped, Spider, Tracks }
-    public enum GunModel { Autocannon, Plasma, Rockets, Cannon, Rail, Grenade, Sword }
+    public enum GunModel { Autocannon, Plasma, Rockets, Cannon, Rail, Grenade, Sword, Howitzer }
 
     public class WeaponDef
     {
         public string Name;
         public GunModel Model;
-        public float Damage, FireRate, ReloadTime, Speed, Spread, Range, Splash;
+        public float Damage, FireRate, Speed, Spread, Range, Splash;
         public float Gravity, Fuse; // для навесных снарядов (гранаты)
         public float Size = 0.25f;
-        public int Magazine, Pellets = 1;
+        public int Pellets = 1;
         public Color Color;
     }
 
@@ -61,31 +61,31 @@ namespace RobotsFight
     {
         public static readonly WeaponDef Autocannon = new()
         {
-            Name = "Автопушка", Model = GunModel.Autocannon, Damage = 28, FireRate = 8, Magazine = 40, ReloadTime = 3f,
+            Name = "Автопушка", Model = GunModel.Autocannon, Damage = 28, FireRate = 8,
             Speed = 130, Spread = 1.4f, Range = 160, Size = 0.2f, Color = new Color(1f, 0.85f, 0.3f),
         };
 
         public static readonly WeaponDef Plasma = new()
         {
-            Name = "Плазмомёт", Model = GunModel.Plasma, Damage = 22, Pellets = 8, FireRate = 1.3f, Magazine = 6,
-            ReloadTime = 3.5f, Speed = 90, Spread = 5f, Range = 60, Size = 0.3f, Color = new Color(0.3f, 0.95f, 1f),
+            Name = "Плазмомёт", Model = GunModel.Plasma, Damage = 22, Pellets = 8, FireRate = 1.3f,
+            Speed = 90, Spread = 5f, Range = 60, Size = 0.3f, Color = new Color(0.3f, 0.95f, 1f),
         };
 
         public static readonly WeaponDef Rockets = new()
         {
-            Name = "Ракеты", Model = GunModel.Rockets, Damage = 160, Splash = 4.5f, FireRate = 2.2f, Magazine = 6,
-            ReloadTime = 5f, Speed = 55, Spread = 1.5f, Range = 220, Size = 0.35f, Color = new Color(1f, 0.5f, 0.15f),
+            Name = "Ракеты", Model = GunModel.Rockets, Damage = 160, Splash = 4.5f, FireRate = 2.2f,
+            Speed = 55, Spread = 1.5f, Range = 220, Size = 0.35f, Color = new Color(1f, 0.5f, 0.15f),
         };
 
         public static readonly WeaponDef Cannon = new()
         {
-            Name = "Тяжёлое орудие", Model = GunModel.Cannon, Damage = 230, Splash = 2.5f, FireRate = 0.9f, Magazine = 4,
-            ReloadTime = 4f, Speed = 150, Spread = 0.4f, Range = 250, Size = 0.4f, Color = new Color(1f, 0.95f, 0.7f),
+            Name = "Тяжёлое орудие", Model = GunModel.Cannon, Damage = 230, Splash = 2.5f, FireRate = 0.9f,
+            Speed = 150, Spread = 0.4f, Range = 250, Size = 0.4f, Color = new Color(1f, 0.95f, 0.7f),
         };
 
         public static readonly WeaponDef Railgun = new()
         {
-            Name = "Рельсотрон", Model = GunModel.Rail, Damage = 650, FireRate = 0.45f, Magazine = 3, ReloadTime = 5.5f,
+            Name = "Рельсотрон", Model = GunModel.Rail, Damage = 650, FireRate = 0.45f,
             Speed = 450, Spread = 0f, Range = 450, Size = 0.25f, Color = new Color(0.75f, 0.4f, 1f),
         };
 
@@ -101,6 +101,16 @@ namespace RobotsFight
         };
 
         public const int GrenadesPerDrop = 99;
+
+        /// <summary>Гаубица на спине: навесной снаряд по кнопке, огромный взрыв, долгая перезарядка.</summary>
+        public static readonly WeaponDef Howitzer = new()
+        {
+            Name = "Гаубица", Model = GunModel.Howitzer, Damage = 1500, Splash = 12f, Gravity = 25f,
+            Range = 9999, Size = 0.9f, Color = new Color(1f, 0.65f, 0.25f),
+        };
+        public const float HowitzerCooldown = 15f, HowitzerMaxRange = 260f;
+
+        public static readonly WeaponDef Lava = new() { Name = "Лава", Color = new Color(1f, 0.45f, 0.1f) };
 
         public static readonly RobotDef[] Robots =
         {

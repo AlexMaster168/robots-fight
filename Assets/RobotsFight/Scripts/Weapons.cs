@@ -3,60 +3,38 @@ using UnityEngine;
 
 namespace RobotsFight
 {
+    /// <summary>Оружие без магазинов и перезарядки: темп стрельбы ограничен только скорострельностью.</summary>
     public class Weapon
     {
         public readonly WeaponDef Def;
         public readonly Transform Muzzle;
-        public int Ammo { get; private set; }
-        public bool Reloading => reloadLeft > 0;
-        public float ReloadProgress => Reloading ? 1f - reloadLeft / Def.ReloadTime : 1f;
 
-        float cooldown, reloadLeft;
+        /// <summary>Готовность к следующему выстрелу, 0..1 (для HUD у медленных пушек).</summary>
+        public float Readiness => cooldown <= 0 ? 1f : 1f - cooldown * Def.FireRate;
+
+        float cooldown;
 
         public Weapon(WeaponDef def, Transform muzzle)
         {
             Def = def;
             Muzzle = muzzle;
-            Ammo = def.Magazine;
         }
 
         public void Tick(float dt)
         {
             if (cooldown > 0) cooldown -= dt;
-            if (reloadLeft > 0)
-            {
-                reloadLeft -= dt;
-                if (reloadLeft <= 0)
-                {
-                    reloadLeft = 0;
-                    Ammo = Def.Magazine;
-                }
-            }
-        }
-
-        public void Reload()
-        {
-            if (!Reloading && Ammo < Def.Magazine) reloadLeft = Def.ReloadTime;
         }
 
         public bool TryFire(Robot owner, Vector3 aimPoint)
         {
-            if (Reloading || cooldown > 0) return false;
-            if (Ammo <= 0)
-            {
-                Reload();
-                return false;
-            }
+            if (cooldown > 0) return false;
             cooldown += 1f / Def.FireRate;
-            Ammo--;
 
             Vector3 origin = Muzzle.position;
             Vector3 dir = (aimPoint - origin).normalized;
             for (int i = 0; i < Def.Pellets; i++)
                 Projectiles.Spawn(owner, origin, Spread(dir, Def.Spread), Def);
             Fx.Blob(origin, Def.Color, Def.Size * 3f, Def.Size * 0.5f, 0.07f);
-
-            if (Ammo == 0) Reload();
             return true;
         }
 
@@ -125,6 +103,7 @@ namespace RobotsFight
                 GunModel.Autocannon => 2.5f,
                 GunModel.Rockets => 3f,
                 GunModel.Grenade => 1f,
+                GunModel.Howitzer => 1.8f,
                 _ => 1.5f,
             };
             var v = Shapes.Prim(PrimitiveType.Sphere, transform, Vector3.zero, new Vector3(def.Size, def.Size, def.Size * len), def.Color, glow: true);
@@ -147,7 +126,7 @@ namespace RobotsFight
             {
                 var s = live[i];
                 s.Age += dt;
-                if (s.Def.Gravity > 0) s.Vel += Vector3.down * (s.Def.Gravity * dt);
+                if (s.Def.Gravity > 0) s.Vel += Vector3.down * (s.Def.Gravity * World.GravityMult * dt);
                 Vector3 step = s.Vel * dt;
                 float len = step.magnitude;
                 bool done = false;
@@ -202,7 +181,7 @@ namespace RobotsFight
         Renderer rend;
         float life, age;
         Vector3 startScale, endScale, vel;
-        bool pooled;
+        bool pooled, pulse;
 
         static Transform Root => Match.I ? Match.I.transform : null;
 
@@ -236,6 +215,20 @@ namespace RobotsFight
             Blob(pos, new Color(1f, 0.75f, 0.3f), radius * 0.4f, radius * 1.8f, 0.25f);
             Blob(pos, c, radius * 0.3f, radius * 1.2f, 0.35f);
             Blob(pos + Vector3.up * 0.5f, new Color(0.2f, 0.2f, 0.2f), radius * 0.35f, radius * 0.1f, 0.9f, Vector3.up * 3f, false);
+        }
+
+        /// <summary>Плоский пульсирующий круг на земле (предупреждение о прилёте гаубицы).</summary>
+        public static void Disc(Vector3 pos, float radius, Color c, float life)
+        {
+            if (!Root) return;
+            var t = Shapes.Prim(PrimitiveType.Cylinder, Root, new Vector3(pos.x, pos.y + 0.06f, pos.z),
+                new Vector3(radius * 2f, 0.02f, radius * 2f), c, glow: true);
+            t.name = "WarnDisc";
+            t.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            var f = t.gameObject.AddComponent<Fx>();
+            f.life = life;
+            f.startScale = f.endScale = t.localScale;
+            f.pulse = true;
         }
 
         public static void RobotExplosion(Vector3 center, float scale, Color c)
@@ -273,6 +266,12 @@ namespace RobotsFight
             }
             float k = age / life;
             transform.localScale = Vector3.Lerp(startScale, endScale, k);
+            if (pulse)
+            {
+                // Сжимающееся кольцо-таймер: чем ближе прилёт, тем быстрее мигает
+                float p = 0.85f + 0.15f * Mathf.Sin(age * (8f + 30f * k));
+                transform.localScale = new Vector3(startScale.x * p, startScale.y, startScale.z * p);
+            }
             if (vel != Vector3.zero) transform.position += vel * dt;
         }
     }

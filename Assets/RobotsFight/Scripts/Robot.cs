@@ -23,12 +23,37 @@ namespace RobotsFight
         [System.NonSerialized] public bool FireInput;
         [System.NonSerialized] public bool Interact;
         [System.NonSerialized] public bool SprintInput;
+        [System.NonSerialized] public bool FlyInput;
 
         // Бег и прыжок
         public const float SprintMultiplier = 1.6f, SprintDuration = 4f, StaminaRegenTime = 3f, JumpSpeed = 9f;
         public float Stamina { get; private set; } = 1f;
         public bool Sprinting { get; private set; }
         float staminaRegenAt;
+
+        // Перепрыгивание препятствий и полёт на ранце
+        public const float MaxVaultHeight = 7f, FlightDuration = 5f, FuelRegenTime = 4f, FlyClimbSpeed = 8f;
+        public float Fuel { get; private set; } = 1f;
+        public bool Flying { get; private set; }
+        float airTime, fuelRegenAt;
+        float Gravity => 25f * World.GravityMult;
+
+        // Гаубица на спине
+        public float HowitzerReadyIn => Mathf.Max(0, howitzerReadyAt - Time.time);
+        float howitzerReadyAt, howitzerKickAt = -99f;
+        Transform howitzerPivot, howitzerMuzzle;
+        Vector3 howitzerBase;
+
+        // Аптечка и щит — у всех, в любой момент боя, с коротким откатом
+        public const float MedkitCooldown = 8f, MedkitHeal = 0.4f, MedkitTime = 1f;
+        public const float ShieldItemCooldown = 10f, ShieldItemTime = 4f;
+        public float MedkitReadyIn => Mathf.Max(0, medkitReadyAt - Time.time);
+        public float ShieldItemReadyIn => Mathf.Max(0, shieldItemReadyAt - Time.time);
+        public bool Healing => Time.time < medkitUntil;
+        float medkitReadyAt, shieldItemReadyAt, medkitUntil;
+
+        // Счётчики для автотеста
+        public static int VaultCount, FlightCount, HowitzerCount, MedkitCount, ShieldItemCount;
 
         public Vector3 Velocity { get; private set; }
         public float Height => Cc.height;
@@ -55,7 +80,7 @@ namespace RobotsFight
         float meleeReadyAt, grenadeReadyAt, swingStart = -99f;
         bool meleeHitDone = true;
         Transform swordPivot;
-        static readonly Quaternion SwordSheathed = Quaternion.Euler(-115, 0, 25);
+        static readonly Quaternion SwordSheathed = Quaternion.Euler(-115, 0, -25);
 
         Transform torso, shieldFx, repairFx, jetFx;
         readonly List<Transform> gunPivots = new();
@@ -183,6 +208,16 @@ namespace RobotsFight
             Shapes.Prim(PrimitiveType.Cube, swordPivot, new Vector3(0, 0, 1.75f * s), new Vector3(0.08f, 0.3f, 2.5f) * s, Catalog.Sword.Color, glow: true);
             swordPivot.localRotation = SwordSheathed;
 
+            // Гаубица за левым плечом, ствол задран вверх-вперёд
+            howitzerBase = new Vector3(-0.55f * s, 0.75f * s, -0.75f * s);
+            howitzerPivot = Shapes.Node("Howitzer", torso, howitzerBase);
+            howitzerPivot.localRotation = Quaternion.Euler(-55, 0, 0);
+            Shapes.Prim(PrimitiveType.Cube, howitzerPivot, new Vector3(0, 0, 0.1f * s), new Vector3(0.55f, 0.55f, 0.7f) * s, dark);
+            Barrel(howitzerPivot, 0.42f * s, 1.3f * s, 0.4f * s, metal);
+            Shapes.Prim(PrimitiveType.Cylinder, howitzerPivot, new Vector3(0, 0, 1.72f * s), new Vector3(0.5f, 0.05f, 0.5f) * s, Catalog.Howitzer.Color, glow: true)
+                .localRotation = Quaternion.Euler(90, 0, 0);
+            howitzerMuzzle = Shapes.Node("HowitzerMuzzle", howitzerPivot, new Vector3(0, 0, 1.9f * s));
+
             // Эффекты способностей
             shieldFx = Shapes.Node("Shield", torso, new Vector3(0, 0.3f * s, 1.6f * s));
             var sc = new Color(0.3f, 0.8f, 1f);
@@ -278,10 +313,26 @@ namespace RobotsFight
             }
             else if (Time.time >= staminaRegenAt) Stamina = Mathf.Min(1f, Stamina + dt / StaminaRegenTime);
 
-            Vector3 move = Vector3.ClampMagnitude(Vec.Flat(MoveInput), 1f) * (Def.Speed * (Sprinting ? SprintMultiplier : 1f));
+            bool grounded = Cc.isGrounded;
+            airTime = grounded ? 0f : airTime + dt;
+
+            Vector3 move = Vector3.ClampMagnitude(Vec.Flat(MoveInput), 1f) * (Def.Speed * (Sprinting ? SprintMultiplier : 1f) * (Flying ? 1.3f : 1f));
             if (Time.time < dashUntil) move += dashVel;
-            if (Cc.isGrounded && velY < 0) velY = -2f;
-            velY -= 25f * dt;
+            if (grounded && velY < 0) velY = -2f;
+            velY -= Gravity * dt;
+
+            // Полёт: держишь прыжок в воздухе — ранец тянет вверх, пока есть топливо
+            bool wasFlying = Flying;
+            Flying = FlyInput && !grounded && airTime > 0.15f && Fuel > 0f;
+            if (Flying)
+            {
+                if (!wasFlying) FlightCount++;
+                Fuel = Mathf.Max(0f, Fuel - dt / FlightDuration);
+                fuelRegenAt = Time.time + 0.5f;
+                velY = Mathf.MoveTowards(velY, FlyClimbSpeed, 45f * dt);
+            }
+            else if (grounded && Time.time >= fuelRegenAt) Fuel = Mathf.Min(1f, Fuel + dt / FuelRegenTime);
+            if (transform.position.y > Arena.Ceiling && velY > 0) velY = 0f;
             Vector3 before = transform.position;
             Cc.Move((move + Vector3.up * velY) * dt);
             Velocity = (transform.position - before) / dt;
@@ -306,7 +357,7 @@ namespace RobotsFight
                 float dist = Vector3.Distance(torso.position, AimPoint);
                 foreach (var w in Weapons)
                 {
-                    if (!Pilot.IsPlayer && dist > w.Def.Range) continue; // боты не тратят патроны впустую
+                    if (Brain is BotBrain && dist > w.Def.Range) continue; // боты (и автопилот) не тратят патроны впустую
                     if (w.TryFire(this, AimPoint)) LastFireTime = Time.time;
                 }
             }
@@ -315,10 +366,16 @@ namespace RobotsFight
 
             // Способности
             if (Repairing) Hp = Mathf.Min(MaxHp, Hp + MaxHp * 0.35f / 3f * dt);
+            if (Healing) Hp = Mathf.Min(MaxHp, Hp + MaxHp * MedkitHeal / MedkitTime * dt);
             shieldFx.gameObject.SetActive(ShieldActive);
-            repairFx.gameObject.SetActive(Repairing);
-            if (Repairing) repairFx.localScale = Vector3.one * (0.4f + 0.15f * Mathf.Sin(Time.time * 12f)) * Def.Scale;
-            jetFx.gameObject.SetActive(Def.Ability == AbilityType.JumpJet ? !Cc.isGrounded : Time.time < dashUntil);
+            repairFx.gameObject.SetActive(Repairing || Healing);
+            if (Repairing || Healing) repairFx.localScale = Vector3.one * (0.4f + 0.15f * Mathf.Sin(Time.time * 12f)) * Def.Scale;
+            jetFx.gameObject.SetActive(Flying || (Def.Ability == AbilityType.JumpJet ? !Cc.isGrounded : Time.time < dashUntil));
+            jetFx.localScale = Vector3.one * (Flying ? 1.3f + 0.3f * Mathf.Sin(Time.time * 40f) : 1f);
+
+            // Откат ствола гаубицы после выстрела
+            float kick = Mathf.Clamp01(1f - (Time.time - howitzerKickAt) / 0.5f);
+            howitzerPivot.localPosition = howitzerBase + howitzerPivot.localRotation * Vector3.back * (kick * 0.45f * Def.Scale);
 
             AnimateLegs(dt);
 
@@ -342,22 +399,70 @@ namespace RobotsFight
         }
 
         // ---------------------------------------------------------------- Действия
-        public void ReloadAll()
-        {
-            foreach (var w in Weapons) w.Reload();
-        }
-
-        public void ReloadIfLow(float fraction)
-        {
-            foreach (var w in Weapons)
-                if (w.Ammo < w.Def.Magazine * fraction) w.Reload();
-        }
-
-        /// <summary>Обычный прыжок — только с земли.</summary>
+        /// <summary>
+        /// Прыжок с земли. Если прямо по курсу препятствие до 7 м — рассчитанный прыжок через него
+        /// (высота + разгон вперёд), иначе обычный прыжок.
+        /// </summary>
         public bool Jump()
         {
             if (!Alive || !Cc.isGrounded) return false;
+            Vector3 dir = Vec.Flat(MoveInput).sqrMagnitude > 0.01f ? Vec.Flat(MoveInput).normalized : Vec.Flat(transform.forward).normalized;
+            if (FindVault(dir, out float h, out float wallDist))
+            {
+                float g = Gravity;
+                velY = Mathf.Sqrt(2f * g * (h + 1.2f));
+                float tUp = velY / g;
+                dashVel = dir * Mathf.Max(6f, (wallDist + 2.5f + Cc.radius) / (tUp * 1.1f));
+                dashUntil = Time.time + tUp * 1.7f;
+                VaultCount++;
+                Fx.Blob(transform.position, new Color(1f, 0.6f, 0.2f), 2f, 0.2f, 0.3f);
+                return true;
+            }
             velY = JumpSpeed;
+            return true;
+        }
+
+        /// <summary>Есть ли по направлению dir препятствие, которое можно перепрыгнуть (выше 0.4 м и не выше 7 м).</summary>
+        public bool CanVaultAhead(Vector3 dir) => Cc.isGrounded && FindVault(Vec.Flat(dir).normalized, out _, out _);
+
+        bool FindVault(Vector3 dir, out float height, out float wallDist)
+        {
+            height = wallDist = 0f;
+            Vector3 feet = transform.position;
+            if (!Phys.Raycast(feet + Vector3.up * 0.6f, dir, Cc.radius + 4.5f, Cc, out var wall) || wall.collider.GetComponent<Robot>())
+                return false;
+            // Верх препятствия — лучом сверху вниз чуть за точкой касания. Если стартуем внутри высокого здания,
+            // луч его не видит и попадает в землю → высота ~0 → не перепрыгиваем.
+            float probeH = MaxVaultHeight + 1.5f;
+            Vector3 probe = new Vector3(wall.point.x, feet.y + probeH, wall.point.z) + dir * 0.4f;
+            if (!Phys.Raycast(probe, Vector3.down, probeH + 0.5f, Cc, out var top)) return false;
+            height = top.point.y - feet.y;
+            wallDist = wall.distance;
+            return height > 0.4f && height <= MaxVaultHeight;
+        }
+
+        /// <summary>Гаубица: навесной снаряд точно в точку прицела (до 260 м), красный круг-предупреждение на месте падения.</summary>
+        public bool FireHowitzer()
+        {
+            if (!Alive || Time.time < howitzerReadyAt) return false;
+            howitzerReadyAt = Time.time + Catalog.HowitzerCooldown;
+            var w = Catalog.Howitzer;
+            float g = w.Gravity * World.GravityMult;
+            Vector3 origin = howitzerMuzzle.position;
+            Vector3 target = AimPoint;
+            Vector3 flat = Vec.Flat(target - origin);
+            if (flat.magnitude > Catalog.HowitzerMaxRange || target.y > transform.position.y + 30f)
+                target = new Vector3(origin.x, transform.position.y, origin.z) + flat.normalized * Mathf.Min(flat.magnitude, Catalog.HowitzerMaxRange);
+            Vector3 delta = target - origin;
+            float t = Mathf.Clamp(Vec.Flat(delta).magnitude / 45f, 1.6f, 4.5f);
+            Vector3 vel = delta / t + Vector3.up * (0.5f * g * t);
+            Projectiles.SpawnVel(this, origin, vel, w);
+            Fx.Disc(target, w.Splash, new Color(1f, 0.15f, 0.1f), t);
+            Fx.Blob(origin, w.Color, 2.5f, 0.4f, 0.25f);
+            Fx.Blob(origin, new Color(0.25f, 0.25f, 0.25f), 1.5f, 3f, 0.8f, Vector3.up * 2f, false);
+            howitzerKickAt = Time.time;
+            LastFireTime = Time.time;
+            HowitzerCount++;
             return true;
         }
 
@@ -447,8 +552,43 @@ namespace RobotsFight
             if (flat.magnitude > 55f) target = new Vector3(origin.x, transform.position.y, origin.z) + flat.normalized * 55f;
             Vector3 delta = target - origin;
             float t = Mathf.Clamp(Vec.Flat(delta).magnitude / 24f, 0.45f, 2.2f);
-            Vector3 vel = delta / t + Vector3.up * (0.5f * g.Gravity * t);
+            Vector3 vel = delta / t + Vector3.up * (0.5f * g.Gravity * World.GravityMult * t);
             Projectiles.SpawnVel(this, origin, vel, g);
+            return true;
+        }
+
+        /// <summary>Аптечка игрока [X]: в любой момент, с откатом. Боты этим не пользуются — только дропом.</summary>
+        public bool UseMedkit()
+        {
+            if (Time.time < medkitReadyAt || !ApplyMedkit()) return false;
+            medkitReadyAt = Time.time + MedkitCooldown;
+            MedkitCount++;
+            return true;
+        }
+
+        /// <summary>Щит игрока [C]: в любой момент, с откатом. Боты этим не пользуются — только дропом.</summary>
+        public bool UseShieldItem()
+        {
+            if (Time.time < shieldItemReadyAt || !ApplyShield()) return false;
+            shieldItemReadyAt = Time.time + ShieldItemCooldown;
+            ShieldItemCount++;
+            return true;
+        }
+
+        /// <summary>Эффект аптечки: +40% прочности за 1 с. При полном здоровье не срабатывает (дроп остаётся лежать).</summary>
+        public bool ApplyMedkit()
+        {
+            if (!Alive || Hp >= MaxHp) return false;
+            medkitUntil = Time.time + MedkitTime;
+            Fx.Blob(Center, new Color(0.3f, 1f, 0.4f), 3f * Def.Scale, 0.5f, 0.35f);
+            return true;
+        }
+
+        /// <summary>Эффект щита: −70% входящего урона на 4 с (тот же энергощит, что у Гризли).</summary>
+        public bool ApplyShield()
+        {
+            if (!Alive) return false;
+            shieldUntil = Mathf.Max(shieldUntil, Time.time + ShieldItemTime);
             return true;
         }
 
